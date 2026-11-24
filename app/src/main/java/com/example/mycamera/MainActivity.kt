@@ -8,6 +8,8 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.os.Bundle
+import android.view.View
+import android.view.WindowInsets
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.widget.Button
@@ -34,6 +36,12 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
   val start = Button(this).apply { text = "Start camera"; setOnClickListener { startCamera() } }
   layout.addView(switch); layout.addView(stop); layout.addView(start)
   setContentView(layout)
+  layout.setOnApplyWindowInsetsListener { view, insets ->
+   val bars = insets.getInsets(WindowInsets.Type.systemBars())
+   view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+   insets
+  }
+  layout.requestApplyInsets()
   preview.holder.addCallback(this)
   if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.CAMERA),1)
  }
