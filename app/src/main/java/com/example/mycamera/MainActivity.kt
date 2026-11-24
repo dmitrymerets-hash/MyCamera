@@ -60,7 +60,6 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
    },null)
   } catch(e:Exception){status.text=e.message}
  }
- }
  override fun surfaceCreated(holder:SurfaceHolder){startCamera()}
  override fun surfaceChanged(holder:SurfaceHolder,format:Int,width:Int,height:Int){}
  override fun surfaceDestroyed(holder:SurfaceHolder){closeCamera()}
