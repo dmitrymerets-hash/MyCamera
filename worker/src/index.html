@@ -44,7 +44,9 @@ function closePeer(){pending=[];if(pc){pc.onicecandidate=null;pc.ontrack=null;pc
 function stop(){if(ws){ws.onclose=null;ws.onerror=null;ws.onmessage=null;ws.close();ws=null;}closePeer();if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}if(mode==='camera'){$('local').srcObject=null;setLive(false);status('Камера выключена.');}else{setViewer(false);status('Отключено.');}}
 async function loadIce(){try{const r=await fetch('/ice',{cache:'no-store'});if(r.ok){const j=await r.json();if(Array.isArray(j.iceServers))return j.iceServers}}catch(e){}return [{urls:'stun:stun.l.google.com:19302'}]}
 async function createPeer(){
+ const queued=pending.slice();
  closePeer();
+ pending=queued;
  pc=new RTCPeerConnection({iceServers:ice});
  const current=pc;
  current.onicecandidate=e=>{if(e.candidate)send({type:'candidate',candidate:e.candidate})};
