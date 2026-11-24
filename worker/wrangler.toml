@@ -1,0 +1,16 @@
+name = "mycamera-remote"
+main = "src/index.js"
+compatibility_date = "2026-04-01"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = false
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
