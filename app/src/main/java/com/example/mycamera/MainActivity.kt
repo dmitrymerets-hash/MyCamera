@@ -4,71 +4,154 @@ import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.hardware.camera2.CameraCaptureSession
-import android.hardware.camera2.CameraDevice
-import android.hardware.camera2.CameraManager
 import android.os.Bundle
-import android.view.View
 import android.view.WindowInsets
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.webkit.PermissionRequest
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 
-class MainActivity : Activity(), SurfaceHolder.Callback {
- private lateinit var preview: SurfaceView
- private lateinit var status: TextView
- private lateinit var manager: CameraManager
- private var camera: CameraDevice? = null
- private var session: CameraCaptureSession? = null
- private var front = false
+class MainActivity : Activity() {
+ private var browser: WebView? = null
+ private var request: PermissionRequest? = null
+ private lateinit var root: LinearLayout
+ private val role = "camera"
+ private val prefs by lazy { getSharedPreferences("remote", MODE_PRIVATE) }
+
  override fun onCreate(savedInstanceState: Bundle?) {
   super.onCreate(savedInstanceState)
-  manager = getSystemService(CAMERA_SERVICE) as CameraManager
-  val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
-  status = TextView(this).apply { text = "Камера включается после разрешения"; setTextColor(Color.WHITE); textSize = 20f; setPadding(20,20,20,20) }
-  preview = SurfaceView(this)
-  layout.addView(status)
-  layout.addView(preview, LinearLayout.LayoutParams(-1,0,1f))
-  val stop = Button(this).apply { text = "ОСТАНОВИТЬ КАМЕРУ"; setOnClickListener { closeCamera(); status.text = "Камера остановлена" } }
-  layout.addView(stop)
-  setContentView(layout)
-  layout.setOnApplyWindowInsetsListener { view, insets ->
-   val bars = insets.getInsets(WindowInsets.Type.systemBars())
-   view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-   insets
+  window.statusBarColor = Color.rgb(10,15,27)
+  window.navigationBarColor = Color.rgb(10,15,27)
+  root = LinearLayout(this).apply {
+   orientation = LinearLayout.VERTICAL
+   setBackgroundColor(Color.rgb(10,15,27))
+   setOnApplyWindowInsetsListener { view, insets ->
+    val bars = insets.getInsets(WindowInsets.Type.systemBars())
+    view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+    insets
+   }
   }
-  layout.requestApplyInsets()
-  preview.holder.addCallback(this)
-  if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.CAMERA),1)
+  setContentView(root)
+  root.requestApplyInsets()
+  showSetup()
  }
- private fun closeCamera() { session?.close(); session=null; camera?.close(); camera=null }
- private fun startCamera() {
-  closeCamera()
-  if (!preview.holder.surface.isValid || checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return
-  try {
-   val id = manager.cameraIdList.firstOrNull { manager.getCameraCharacteristics(it).get(android.hardware.camera2.CameraCharacteristics.LENS_FACING) == (if(front) android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT else android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK) } ?: return
-   manager.openCamera(id, object : CameraDevice.StateCallback() {
-    override fun onOpened(device: CameraDevice) {
-     camera=device
-     val surface=preview.holder.surface
-     device.createCaptureSession(listOf(surface),object:CameraCaptureSession.StateCallback(){
-      override fun onConfigured(s:CameraCaptureSession){
-       session=s
-       try { val request=device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply { addTarget(surface) }.build(); s.setRepeatingRequest(request,null,null); runOnUiThread { status.text="Камера включена" } } catch(e:Exception){runOnUiThread{status.text=e.message}}
+ private fun showSetup() {
+  browser?.destroy()
+  browser = null
+  root.removeAllViews()
+  val heading = TextView(this).apply {
+   text = "MyCamera — камера"
+   textSize = 24f
+   setTextColor(Color.WHITE)
+   setPadding(24,30,24,20)
+  }
+  val help = TextView(this).apply {
+   text = "Введи HTTPS-адрес твоего бесплатного Cloudflare Worker. Он должен быть одинаковым на обоих телефонах."
+   textSize = 15f
+   setTextColor(Color.LTGRAY)
+   setPadding(24,0,24,18)
+  }
+  val address = EditText(this).apply {
+   setSingleLine()
+   hint = "https://mycamera-remote.имя.workers.dev"
+   setText(prefs.getString("server",""))
+   setTextColor(Color.WHITE)
+   setHintTextColor(Color.GRAY)
+   setPadding(24,12,24,12)
+  }
+  val open = Button(this).apply { text = "Открыть MyCamera — камера" }
+  root.addView(heading);root.addView(help);root.addView(address)
+  root.addView(open)
+  open.setOnClickListener {
+   val url = address.text.toString().trim().trimEnd('/')
+   val parsed = try { android.net.Uri.parse(url) } catch (_: Exception) { null }
+   if (parsed?.scheme != "https" || parsed.host.isNullOrBlank() ||
+       parsed.host?.endsWith(".workers.dev") != true || parsed.path !in listOf(null, "", "/")) {
+    Toast.makeText(this,"Нужен HTTPS-адрес вида https://имя.workers.dev",Toast.LENGTH_LONG).show()
+    return@setOnClickListener
+   }
+   prefs.edit().putString("server",url).apply()
+   showBrowser(url)
+  }
+ }
+ private fun showBrowser(url: String) {
+  root.removeAllViews()
+  val back = Button(this).apply {
+   text = "Сменить сервер"
+   setOnClickListener { closeBrowser();showSetup() }
+  }
+  root.addView(back)
+  val view = WebView(this)
+  browser = view
+  root.addView(view,LinearLayout.LayoutParams(-1,0,1f))
+  view.settings.javaScriptEnabled = true
+  view.settings.domStorageEnabled = true
+  view.settings.mediaPlaybackRequiresUserGesture = true
+  view.settings.allowFileAccess = false
+  view.settings.allowContentAccess = false
+  view.webViewClient = object : WebViewClient() {
+   override fun shouldOverrideUrlLoading(v: WebView?, req: android.webkit.WebResourceRequest?): Boolean {
+    return req?.url?.host != android.net.Uri.parse(url).host
+   }
+  }
+  view.webChromeClient = object : WebChromeClient() {
+   override fun onPermissionRequest(newRequest: PermissionRequest) {
+    runOnUiThread {
+     val expectedHost = android.net.Uri.parse(url).host
+     if (role != "camera" || newRequest.origin.scheme != "https" || newRequest.origin.host != expectedHost ||
+         !newRequest.resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) {
+      newRequest.deny()
+     } else {
+      request = newRequest
+      if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+       allowCamera()
+      } else {
+       requestPermissions(arrayOf(Manifest.permission.CAMERA),100)
       }
-      override fun onConfigureFailed(s:CameraCaptureSession){runOnUiThread{status.text="Camera setup failed"}}
-     },null)
+     }
     }
-    override fun onDisconnected(device:CameraDevice){device.close()}
-    override fun onError(device:CameraDevice,error:Int){device.close();runOnUiThread{status.text="Camera error: $error"}}
-   },null)
-  } catch(e:Exception){status.text=e.message}
+   }
+   override fun onPermissionRequestCanceled(cancelled: PermissionRequest) {
+    if (request == cancelled) request = null
+   }
+  }
+  view.loadUrl(url+"/?role="+role)
  }
- override fun surfaceCreated(holder:SurfaceHolder){startCamera()}
- override fun surfaceChanged(holder:SurfaceHolder,format:Int,width:Int,height:Int){}
- override fun surfaceDestroyed(holder:SurfaceHolder){closeCamera()}
- override fun onRequestPermissionsResult(requestCode:Int,permissions:Array<out String>,grantResults:IntArray){super.onRequestPermissionsResult(requestCode,permissions,grantResults);if(requestCode==1 && grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED)startCamera()}
- override fun onPause(){super.onPause();closeCamera()}
+ private fun allowCamera() {
+  val pending=request
+  request=null
+  pending?.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
+ }
+ private fun closeBrowser() {
+  request?.deny();request=null
+  browser?.apply { loadUrl("about:blank");stopLoading();destroy() }
+  browser=null
+ }
+ override fun onRequestPermissionsResult(code:Int, permissions:Array<out String>,results:IntArray) {
+  super.onRequestPermissionsResult(code,permissions,results)
+  if(code==100) {
+   if(results.firstOrNull()==PackageManager.PERMISSION_GRANTED) allowCamera()
+   else { request?.deny();request=null }
+  }
+ }
+ override fun onStop() {
+  super.onStop()
+  // Stop capture whenever the broadcasting app leaves the screen.
+  if(role=="camera" && browser!=null) {
+   browser?.loadUrl("about:blank")
+   Toast.makeText(this,"Трансляция остановлена",Toast.LENGTH_SHORT).show()
+  }
+ }
+ override fun onResume() {
+  super.onResume()
+  if(role=="camera" && browser?.url == "about:blank") {
+   prefs.getString("server",null)?.let {browser?.loadUrl(it+"/?role=camera")}
+  }
+ }
+ override fun onDestroy() {closeBrowser();super.onDestroy()}
 }
