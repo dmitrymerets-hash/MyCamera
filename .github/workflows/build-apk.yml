@@ -19,7 +19,7 @@ jobs:
         with:
           gradle-version: '8.10.2'
       - name: Build APK
-        run: gradle :app:assembleDebug --no-daemon
+        run: gradle :app:assembleDebug :viewer:assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: MyCamera-APK
