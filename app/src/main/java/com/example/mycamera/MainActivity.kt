@@ -27,14 +27,12 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
   super.onCreate(savedInstanceState)
   manager = getSystemService(CAMERA_SERVICE) as CameraManager
   val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
-  status = TextView(this).apply { text = "My Camera"; setTextColor(Color.WHITE); textSize = 20f; setPadding(20,20,20,20) }
+  status = TextView(this).apply { text = "Камера включается после разрешения"; setTextColor(Color.WHITE); textSize = 20f; setPadding(20,20,20,20) }
   preview = SurfaceView(this)
   layout.addView(status)
   layout.addView(preview, LinearLayout.LayoutParams(-1,0,1f))
-  val switch = Button(this).apply { text = "Switch camera"; setOnClickListener { front = !front; startCamera() } }
-  val stop = Button(this).apply { text = "Stop camera"; setOnClickListener { closeCamera(); status.text = "Camera stopped" } }
-  val start = Button(this).apply { text = "Start camera"; setOnClickListener { startCamera() } }
-  layout.addView(switch); layout.addView(stop); layout.addView(start)
+  val stop = Button(this).apply { text = "ОСТАНОВИТЬ КАМЕРУ"; setOnClickListener { closeCamera(); status.text = "Камера остановлена" } }
+  layout.addView(stop)
   setContentView(layout)
   layout.setOnApplyWindowInsetsListener { view, insets ->
    val bars = insets.getInsets(WindowInsets.Type.systemBars())
@@ -58,7 +56,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
      device.createCaptureSession(listOf(surface),object:CameraCaptureSession.StateCallback(){
       override fun onConfigured(s:CameraCaptureSession){
        session=s
-       try { val request=device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply { addTarget(surface) }.build(); s.setRepeatingRequest(request,null,null); runOnUiThread { status.text="Camera active" } } catch(e:Exception){runOnUiThread{status.text=e.message}}
+       try { val request=device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply { addTarget(surface) }.build(); s.setRepeatingRequest(request,null,null); runOnUiThread { status.text="Камера включена" } } catch(e:Exception){runOnUiThread{status.text=e.message}}
       }
       override fun onConfigureFailed(s:CameraCaptureSession){runOnUiThread{status.text="Camera setup failed"}}
      },null)
