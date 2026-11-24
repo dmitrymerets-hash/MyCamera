@@ -7,9 +7,9 @@
 <h1 id="heading">MyCamera Remote</h1><p class="muted" id="intro"></p>
 <div id="cameraPanel" class="hidden">
 <div class="banner hidden" id="liveBanner">🔴 КАМЕРА ПЕРЕДАЁТ ВИДЕО — трансляция включена</div>
-<video id="local" autoplay playsinline muted></video>
+
 <p id="cameraStatus" class="muted">Камера выключена.</p>
-<button id="start">Включить камеру и начать трансляцию</button>
+<button id="start" class="hidden">Разрешить удалённую трансляцию</button><button id="cameraOff" class="stop">Остановить камеру</button>
 <button id="stop" class="stop hidden">Остановить трансляцию</button>
 <div id="share" class="card hidden">
 <b>Приватный код трансляции</b>
@@ -23,25 +23,25 @@
 <video id="remote" autoplay playsinline></video>
 <p id="viewerStatus" class="muted">Ожидание подключения.</p>
 </div>
-<p class="small muted">Передача доступна только после того, как владелец телефона с камерой нажмёт кнопку включения. На телефоне с камерой всегда показан индикатор работы; при закрытии или сворачивании трансляция прекращается.</p>
+<p class="small muted">Камера запрашивает разрешение при открытии. Передача через интернет начинается только после отдельного подтверждения. На телефоне с камерой всегда показан индикатор работы; при закрытии или сворачивании трансляция прекращается.</p>
 </main><script>
 (()=>{'use strict';
 const $=x=>document.getElementById(x);
 const mode=new URLSearchParams(location.search).get('role')==='viewer'?'viewer':'camera';
 $('heading').textContent=mode==='camera'?'MyCamera — камера':'MyCamera Viewer';
-$('intro').textContent=mode==='camera'?'Включи камеру и поделись приватным кодом.':'Вставь код с телефона, на котором включили камеру.';
+$('intro').textContent=mode==='camera'?'После разрешения Android камера включится локально. Для передачи видео отдельно разреши трансляцию.':'Вставь код с телефона, на котором включили камеру.';
 $(mode==='camera'?'cameraPanel':'viewerPanel').classList.remove('hidden');
 let ws=null,pc=null,stream=null,ice=[],room=null,pending=[];
 const status=(s)=>$(mode==='camera'?'cameraStatus':'viewerStatus').textContent=s;
 const send=data=>{if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(data))};
 const setLive=live=>{
  if(mode!=='camera')return;
- $('start').classList.toggle('hidden',live);$('stop').classList.toggle('hidden',!live);
+ $('start').classList.toggle('hidden',live || !stream);$('stop').classList.toggle('hidden',!live);
  $('share').classList.toggle('hidden',!live);$('liveBanner').classList.toggle('hidden',!live);
 };
 const setViewer=connected=>{$('connect').classList.toggle('hidden',connected);$('disconnect').classList.toggle('hidden',!connected)};
 function closePeer(){pending=[];if(pc){pc.onicecandidate=null;pc.ontrack=null;pc.onconnectionstatechange=null;pc.close();pc=null;}if(mode==='viewer'){$('remote').srcObject=null;}}
-function stop(){if(ws){ws.onclose=null;ws.onerror=null;ws.onmessage=null;ws.close();ws=null;}closePeer();if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}if(mode==='camera'){$('local').srcObject=null;setLive(false);status('Камера выключена.');}else{setViewer(false);status('Отключено.');}}
+function stop(){if(ws){ws.onclose=null;ws.onerror=null;ws.onmessage=null;ws.close();ws=null;}closePeer();if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}if(mode==='camera'){setLive(false);$('start').classList.add('hidden');status('Камера выключена.');}else{setViewer(false);status('Отключено.');}}
 async function loadIce(){try{const r=await fetch('/ice',{cache:'no-store'});if(r.ok){const j=await r.json();if(Array.isArray(j.iceServers))return j.iceServers}}catch(e){}return [{urls:'stun:stun.l.google.com:19302'}]}
 async function createPeer(){
  const queued=pending.slice();
@@ -92,15 +92,27 @@ $('start').onclick=async()=>{
  $('start').disabled=true;status('Запрашиваем разрешение на камеру…');
  try{
   if(!navigator.mediaDevices?.getUserMedia)throw new Error('Камера недоступна в этом браузере.');
-  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});
-  $('local').srcObject=stream;room=newRoom();ice=await loadIce();
+  if(!stream)throw new Error('Сначала разреши камеру в Android.');
+  room=newRoom();ice=await loadIce();
   await connectSocket();setLive(true);
   $('roomCode').textContent=room;$('roomLink').textContent=shareLink();
   status('Камера включена. Отправь код зрителю.');
   stream.getVideoTracks()[0].onended=()=>stop();
- }catch(e){stop();status('Не удалось запустить камеру: '+e.message)}finally{$('start').disabled=false}
+ }catch(e){if(ws){ws.close();ws=null;}closePeer();setLive(false);status('Не удалось начать трансляцию: '+e.message)}finally{$('start').disabled=false}
 };
-$('stop').onclick=stop;
+$('stop').onclick=()=>{if(ws){ws.close();ws=null;}closePeer();setLive(false);status('Трансляция остановлена. Камера включена локально.');};
+$('cameraOff').onclick=stop;
+async function openLocalCamera(){
+ if(mode!=='camera')return;
+ try{
+  status('Запрашиваем разрешение Android на камеру…');
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});
+  $('start').classList.remove('hidden');
+  status('Камера включена локально. Удалённая трансляция выключена.');
+  stream.getVideoTracks()[0].onended=stop;
+ }catch(e){status('Камера не включена: '+e.message);}
+}
+if(mode==='camera')openLocalCamera();
 $('copyCode').onclick=()=>copy(room||'');
 $('copyLink').onclick=()=>copy(shareLink());
 $('codeInput').value=new URLSearchParams(location.search).get('room')||'';
