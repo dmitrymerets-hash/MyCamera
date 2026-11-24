@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>MyCamera Remote</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#090d17;color:#f4f6ff;font:16px system-ui,-apple-system,Arial;padding:20px;padding-top:max(20px,env(safe-area-inset-top));}main{max-width:600px;margin:auto}h1{font-size:25px;margin:8px 0 6px}.muted{color:#aeb9d2}.small{font-size:13px}button,input{font:inherit;border-radius:12px;border:1px solid #52627d;padding:13px;margin:6px 0;width:100%;color:#fff}button{background:#3764eb;font-weight:700;cursor:pointer}button:disabled{opacity:.5}button.stop{background:#b42f42}input{background:#1e283b}video{width:100%;aspect-ratio:3/4;object-fit:contain;background:#000;border-radius:16px;margin:12px 0}.card{background:#151e30;padding:16px;border-radius:18px;margin:16px 0}.on{color:#67ec96;font-weight:700}.off{color:#f3af91}.hidden{display:none}.code{font-size:13px;overflow-wrap:anywhere;background:#0c1322;padding:12px;border-radius:8px}a{color:#a7bdff}.banner{padding:12px;background:#3e1321;border:1px solid #d9546d;border-radius:12px;font-weight:700;margin:12px 0}label{display:block;margin-top:8px}
+</style></head><body><main>
+<h1 id="heading">MyCamera Remote</h1><p class="muted" id="intro"></p>
+<div id="cameraPanel" class="hidden">
+<div class="banner hidden" id="liveBanner">🔴 КАМЕРА ПЕРЕДАЁТ ВИДЕО — трансляция включена</div>
+<video id="local" autoplay playsinline muted></video>
+<p id="cameraStatus" class="muted">Камера выключена.</p>
+<button id="start">Включить камеру и начать трансляцию</button>
+<button id="stop" class="stop hidden">Остановить трансляцию</button>
+<div id="share" class="card hidden">
+<b>Приватный код трансляции</b>
+<p class="small muted">Отправь его только человеку, которому разрешаешь просмотр.</p>
+<div id="roomCode" class="code"></div><button id="copyCode">Скопировать код</button>
+<p class="small muted">Ссылка для подключения:</p><div id="roomLink" class="code"></div><button id="copyLink">Скопировать ссылку</button>
+</div></div>
+<div id="viewerPanel" class="hidden"><label for="codeInput">Код или ссылка трансляции</label>
+<input id="codeInput" placeholder="Вставь полученный код или ссылку" autocomplete="off" spellcheck="false">
+<button id="connect">Подключиться к камере</button><button id="disconnect" class="stop hidden">Отключиться</button>
+<video id="remote" autoplay playsinline></video>
+<p id="viewerStatus" class="muted">Ожидание подключения.</p>
+</div>
+<p class="small muted">Передача доступна только после того, как владелец телефона с камерой нажмёт кнопку включения. На телефоне с камерой всегда показан индикатор работы; при закрытии или сворачивании трансляция прекращается.</p>
+</main><script>
+(()=>{'use strict';
+const $=x=>document.getElementById(x);
+const mode=new URLSearchParams(location.search).get('role')==='viewer'?'viewer':'camera';
+$('heading').textContent=mode==='camera'?'MyCamera — камера':'MyCamera Viewer';
+$('intro').textContent=mode==='camera'?'Включи камеру и поделись приватным кодом.':'Вставь код с телефона, на котором включили камеру.';
+$(mode==='camera'?'cameraPanel':'viewerPanel').classList.remove('hidden');
+let ws=null,pc=null,stream=null,ice=[],room=null,pending=[];
+const status=(s)=>$(mode==='camera'?'cameraStatus':'viewerStatus').textContent=s;
+const send=data=>{if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(data))};
+const setLive=live=>{
+ if(mode!=='camera')return;
+ $('start').classList.toggle('hidden',live);$('stop').classList.toggle('hidden',!live);
+ $('share').classList.toggle('hidden',!live);$('liveBanner').classList.toggle('hidden',!live);
+};
+const setViewer=connected=>{$('connect').classList.toggle('hidden',connected);$('disconnect').classList.toggle('hidden',!connected)};
+function closePeer(){pending=[];if(pc){pc.onicecandidate=null;pc.ontrack=null;pc.onconnectionstatechange=null;pc.close();pc=null;}if(mode==='viewer'){$('remote').srcObject=null;}}
+function stop(){if(ws){ws.onclose=null;ws.onerror=null;ws.onmessage=null;ws.close();ws=null;}closePeer();if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}if(mode==='camera'){$('local').srcObject=null;setLive(false);status('Камера выключена.');}else{setViewer(false);status('Отключено.');}}
+async function loadIce(){try{const r=await fetch('/ice',{cache:'no-store'});if(r.ok){const j=await r.json();if(Array.isArray(j.iceServers))return j.iceServers}}catch(e){}return [{urls:'stun:stun.l.google.com:19302'}]}
+async function createPeer(){
+ closePeer();
+ pc=new RTCPeerConnection({iceServers:ice});
+ const current=pc;
+ current.onicecandidate=e=>{if(e.candidate)send({type:'candidate',candidate:e.candidate})};
+ current.onconnectionstatechange=()=>{
+  if(current!==pc)return;
+  if(current.connectionState==='connected')status('Соединение установлено. Видео передаётся.');
+  if(['failed','disconnected'].includes(current.connectionState))status('Соединение прервано. Проверь интернет или TURN-сервер.');
+ };
+ if(mode==='camera'){stream.getTracks().forEach(t=>current.addTrack(t,stream));}
+ else{current.ontrack=e=>{$('remote').srcObject=e.streams[0]};}
+ return current;
+}
+async function startOffer(){if(!stream||!ws||ws.readyState!==WebSocket.OPEN)return;
+ const p=await createPeer();const offer=await p.createOffer();await p.setLocalDescription(offer);send({type:'offer',sdp:p.localDescription});status('Отправлено приглашение для просмотра.');}
+async function processMessage(msg){
+ if(msg.type==='viewer-joined'&&mode==='camera'&&stream){await startOffer();return;}
+ if(msg.type==='viewer-left'&&mode==='camera'){closePeer();status('Зритель отключился. Камера остаётся включённой.');return;}
+ if(msg.type==='camera-left'&&mode==='viewer'){closePeer();status('Владелец камеры остановил трансляцию.');return;}
+ if(msg.type==='offer'&&mode==='viewer'){
+  const p=await createPeer();await p.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+  await flushCandidates();const answer=await p.createAnswer();await p.setLocalDescription(answer);send({type:'answer',sdp:p.localDescription});return;
+ }
+ if(msg.type==='answer'&&mode==='camera'&&pc){await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));await flushCandidates();return;}
+ if(msg.type==='candidate'&&msg.candidate){if(pc&&pc.remoteDescription)await pc.addIceCandidate(msg.candidate);else pending.push(msg.candidate);}
+}
+async function flushCandidates(){if(!pc||!pc.remoteDescription)return;const list=pending.splice(0);for(const c of list){try{await pc.addIceCandidate(c)}catch(e){}}}
+function connectSocket(){
+ const url=new URL('/signal/'+room,location.origin);url.protocol=url.protocol==='https:'?'wss:':'ws:';url.searchParams.set('role',mode);
+ return new Promise((resolve,reject)=>{
+  const socket=new WebSocket(url);ws=socket;let ready=false;
+  socket.onopen=()=>{ready=true;resolve();};
+  socket.onerror=()=>{if(!ready)reject(new Error('Не удалось подключиться к серверу.'));else status('Ошибка связи с сервером.');};
+  socket.onclose=()=>{if(!ready)reject(new Error('Соединение отклонено. Возможно, уже подключён другой телефон.'));else if(ws===socket){stop();status('Связь с сервером потеряна.');}};
+  socket.onmessage=async e=>{try{await processMessage(JSON.parse(e.data))}catch(err){status('Ошибка видеосвязи: '+err.message)}};
+ });
+}
+function newRoom(){const v=new Uint8Array(16);crypto.getRandomValues(v);return [...v].map(n=>n.toString(16).padStart(2,'0')).join('')}
+function extractCode(value){value=value.trim();try{const u=new URL(value);value=u.searchParams.get('room')||value}catch(e){}return /^[a-f0-9]{32}$/i.test(value)?value.toLowerCase():null}
+function shareLink(){const u=new URL(location.origin+'/');u.searchParams.set('role','viewer');u.searchParams.set('room',room);return u.href}
+function copy(txt){if(navigator.clipboard?.writeText)navigator.clipboard.writeText(txt).then(()=>status('Скопировано.')).catch(()=>fallbackCopy(txt));else fallbackCopy(txt)}
+function fallbackCopy(value){const a=document.createElement('textarea');a.value=value;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();status('Скопировано.')}
+$('start').onclick=async()=>{
+ $('start').disabled=true;status('Запрашиваем разрешение на камеру…');
+ try{
+  if(!navigator.mediaDevices?.getUserMedia)throw new Error('Камера недоступна в этом браузере.');
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});
+  $('local').srcObject=stream;room=newRoom();ice=await loadIce();
+  await connectSocket();setLive(true);
+  $('roomCode').textContent=room;$('roomLink').textContent=shareLink();
+  status('Камера включена. Отправь код зрителю.');
+  stream.getVideoTracks()[0].onended=()=>stop();
+ }catch(e){stop();status('Не удалось запустить камеру: '+e.message)}finally{$('start').disabled=false}
+};
+$('stop').onclick=stop;
+$('copyCode').onclick=()=>copy(room||'');
+$('copyLink').onclick=()=>copy(shareLink());
+$('codeInput').value=new URLSearchParams(location.search).get('room')||'';
+$('connect').onclick=async()=>{
+ const value=extractCode($('codeInput').value);if(!value){status('Введи корректный код или ссылку.');return;}
+ $('connect').disabled=true;room=value;status('Подключаемся…');
+ try{ice=await loadIce();await connectSocket();setViewer(true);status('Подключено к серверу. Ожидаем видео от камеры.');}
+ catch(e){stop();status(e.message)}finally{$('connect').disabled=false}
+};
+$('disconnect').onclick=stop;
+document.addEventListener('visibilitychange',()=>{if(mode==='camera'&&document.hidden&&stream)stop()});
+window.addEventListener('pagehide',stop);
+})();
+</script></body></html>
