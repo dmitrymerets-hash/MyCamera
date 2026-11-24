@@ -22,5 +22,9 @@ jobs:
         run: gradle :app:assembleDebug :viewer:assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: MyCamera-APK
+          name: MyCamera-Camera-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MyCamera-Viewer-APK
+          path: viewer/build/outputs/apk/debug/viewer-debug.apk
